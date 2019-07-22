@@ -93,11 +93,12 @@ private:
 	std::vector<std::shared_ptr<VirtualRow>> calculateRows(const std::vector<std::shared_ptr<Trade>>& data, PDFPage& page);
 
 	bool isLastRow(std::vector<std::shared_ptr<VirtualRow>>& rows);
-	void fixNewTable(std::vector<std::shared_ptr<VirtualRow>>& rows);
+	std::vector<std::shared_ptr<VirtualRow>> fixNewTable(std::vector<std::shared_ptr<VirtualRow>>& rows);
 	std::vector<std::shared_ptr<VirtualRow>> fixTable(const std::vector<std::shared_ptr<VirtualRow>>& rows);
 	size_t whichPage(std::shared_ptr<VirtualRow>& row);
 	bool isFirstRow(std::shared_ptr<VirtualRow>& row);
 	bool crossOnePage(std::vector<std::shared_ptr<VirtualRow>>& rows);
-	bool crossMultipages(std::vector<std::shared_ptr<VirtualRow>>& rows);
+	size_t crossMultipages(std::vector<std::shared_ptr<VirtualRow>>& rows);
+	void addHeaders(std::vector<std::shared_ptr<VirtualRow>>& rows, std::vector<std::shared_ptr<VirtualRow>>& table, size_t crossed);
 };
 

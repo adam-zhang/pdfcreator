@@ -561,6 +561,19 @@ size_t getTableHeader(const vector<shared_ptr<VirtualRow>>& rows)
 	return index;
 }
 
+vector<shared_ptr<VirtualRow>> getHeaders(vector<shared_ptr<VirtualRow>>& rows)
+{
+	vector<shared_ptr<VirtualRow>> vec;
+	for(size_t i = 0; i != rows.size(); ++i)
+	{
+		if (rows[i]->rowType() == VirtualRow::HEADER)
+		{
+			vec.push_back(rows[i]);
+			continue;
+		}
+	}
+	return vec;
+}
 vector<shared_ptr<VirtualRow>> getTable(const vector<shared_ptr<VirtualRow>>& rows, size_t index)
 {
 	vector<shared_ptr<VirtualRow>> table;
@@ -609,21 +622,24 @@ bool PDFCreator::isLastRow(vector<shared_ptr<VirtualRow>>& rows)
 	return false;
 }
 
-void addRowNumber(vector<shared_ptr<VirtualRow>>& rows, size_t index)
+void addRowNumber(vector<shared_ptr<VirtualRow>>& rows, size_t index, vector<shared_ptr<VirtualRow>>& table)
 {
+	auto headers = getHeaders(table);
 	for(size_t i = index; i != rows.size(); ++i)
-		rows[i]->setIndex(rows[i]->index() + 1);
+		rows[i]->setIndex(rows[i]->index() + headers.size());
 }
 
 size_t PDFCreator::whichPage(shared_ptr<VirtualRow>& row)
 {
-	size_t count = 1;
-	bool stop = false;
-	while(!stop)
+	if (row->index() >= 0 && row->index() <= a4RowsNumber())
+		return 0;
+	size_t pageNumber = 1;
+	while(true)
 	{
-		if (row->index() > a4CoverRowsNumber() && row->index() < a4CoverRowsNumber()  + a4RowsNumber() * count)
-			return count;
-		++count;
+		if (row->index() > a4CoverRowsNumber() + (pageNumber - 1) * a4RowsNumber()
+			&& row->index() <= a4CoverRowsNumber() + pageNumber * a4RowsNumber())
+			return pageNumber;
+		++pageNumber;
 	}
 	return -1;
 }
@@ -646,33 +662,17 @@ bool PDFCreator::crossOnePage(vector<shared_ptr<VirtualRow>>& rows)
 	return false;
 }
 
-void addHeader(vector<shared_ptr<VirtualRow>>& rows)
-{
-
-}
 
 
 
-bool PDFCreator::crossMultipages(vector<shared_ptr<VirtualRow>>& rows)
+size_t PDFCreator::crossMultipages(vector<shared_ptr<VirtualRow>>& rows)
 {
 	size_t beginning = whichPage(rows[0]);
 	size_t ending = whichPage(rows[rows.size() - 1]);
-	return (beginning - ending)  > 2;
+	return ending - beginning;
 }
 
-vector<shared_ptr<VirtualRow>> getHeaders(vector<shared_ptr<VirtualRow>>& rows)
-{
-	vector<shared_ptr<VirtualRow>> vec;
-	for(size_t i = 0; i != rows.size(); ++i)
-	{
-		if (rows[i]->rowType() == VirtualRow::HEADER)
-		{
-			vec.push_back(rows[i]);
-			continue;
-		}
-	}
-	return vec;
-}
+
 
 size_t getNextPage(vector<shared_ptr<VirtualRow>>& rows)
 {
@@ -684,54 +684,69 @@ void addHeader(vector<shared_ptr<VirtualRow>>& headers, vector<shared_ptr<Virtua
 	
 }
 
-
-void addHeaders(vector<shared_ptr<VirtualRow>>& rows, vector<shared_ptr<VirtualRow>>& table)
+void addHeader(size_t previous, vector<shared_ptr<VirtualRow>>& header, vector<shared_ptr<VirtualRow>>& rows)
 {
-	auto headers = getHeaders(table);	
-	while(auto i = getNextPage(table))		
-		addHeader(headers, table, i);
+	for(auto i = previous ; i != rows.size(); ++i)
+	{
+		rows[i]->setIndex(rows[i]->index() + header.size());
+	}
+	for(auto i = 0; i != header.size(); ++i)
+	{
+		rows.insert(rows.begin() + previous + i, header[i]);
+	}
 }
 
-void PDFCreator::fixNewTable(vector<shared_ptr<VirtualRow>>& rows)
+void PDFCreator::addHeaders(vector<shared_ptr<VirtualRow>>& rows, vector<shared_ptr<VirtualRow>>& table, size_t crossed)
+{
+	auto headers = getHeaders(table);
+	for(size_t i = 0; i != crossed; ++i)
+	{
+		if (i == 0)
+			addHeader(a4CoverRowsNumber(), headers, rows);
+		else
+			addHeader(a4RowsNumber() * (i + 1), headers, rows);
+	}
+}
+	
+
+vector<shared_ptr<VirtualRow>> PDFCreator::fixNewTable(vector<shared_ptr<VirtualRow>>& rows)
 {
 	auto tables = getTables(rows);
 	for(size_t i = 0; i != tables.size(); ++i)
 	{
 		if (isLastRow(tables[i]))
 		{
-			addRowNumber(rows, tables[i][0]->index());
+			addRowNumber(rows, tables[i][0]->index(), tables[i]);
 			continue;
 		}
 		auto crossed = crossMultipages(tables[i]);
-		Debugger::write("crossed", crossed);
-		//else if (crossMultipages(tables[i]))
-		//	addHeaders(rows, tables[i]);
-		//else if (crossOnePage(tables[i]))
-		//	addHeader(tables[i]);
+		if (crossed > 0)
+			addHeaders(rows, tables[i], crossed);
 	}
+	return rows;
 }
 
 vector<shared_ptr<VirtualRow>> PDFCreator::fixTable(const vector<shared_ptr<VirtualRow>>& rows)
 {
 	vector<shared_ptr<VirtualRow>> newRows = rows;
-	fixNewTable(newRows);
-	return newRows;
+	return fixNewTable(newRows);
+	//return newRows;
 }
 
 PDFDocument PDFCreator::generateMultipageDocument(const vector<shared_ptr<VirtualRow>>& rows)
 {
 	auto doc = createDocument();
 	auto font = getFontFrom(doc);
-	fixTable(rows);
+	auto newRows = fixTable(rows);
 	auto count = calculatePages(rows.size());
 	for(size_t i = 0; i != count; ++i)
 	{
 		auto page = doc.addPage();
 		page.setFontAndSize(font, 12);
 		if ( i == 0)
-			drawCover(page, rows);
+			drawCover(page, newRows);
 		else
-			drawPage(page, rows, i);
+			drawPage(page, newRows, i);
 	}
 	return doc;
 }
@@ -821,6 +836,7 @@ void PDFCreator::drawCover(PDFPage& page, const vector<shared_ptr<VirtualRow>>& 
 	auto actual = ::actualRows(rows, a4CoverRowsNumber());
 	for(size_t i = 0; i != actual.size(); ++i)
 	{
+		Debugger::write("i in cover", i);
 		auto h = page.height();
 		auto w = page.width();
 		float y = page.height() - verticalMargin() - logoHeight() - titleHeight() - rowHeight() - i * rowHeight();
